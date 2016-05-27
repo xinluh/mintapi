@@ -145,7 +145,7 @@ class Mint(requests.Session):
         # 2: Grab token.
         self.token = response['sUser']['token']
 
-    def get_accounts(self, get_detail=False):  # {{{
+    def get_accounts(self, parse_date=True, get_detail=False):  # {{{
         # Issue service request.
         req_id = str(self.request_id)
 
@@ -183,17 +183,18 @@ class Mint(requests.Session):
         accounts = response['response'][req_id]['response']
 
         # Return datetime objects for dates
-        for account in accounts:
-            for df in DATE_FIELDS:
-                if df in account:
-                    # Convert from javascript timestamp to unix timestamp
-                    # http://stackoverflow.com/a/9744811/5026
-                    try:
-                        ts = account[df] / 1e3
-                    except TypeError:
-                        # returned data is not a number, don't parse
-                        continue
-                    account[df + 'InDate'] = datetime.fromtimestamp(ts)
+        if parse_date:
+            for account in accounts:
+                for df in DATE_FIELDS:
+                    if df in account:
+                        # Convert from javascript timestamp to unix timestamp
+                        # http://stackoverflow.com/a/9744811/5026
+                        try:
+                            ts = account[df] / 1e3
+                        except TypeError:
+                            # returned data is not a number, don't parse
+                            continue
+                        account[df + 'InDate'] = datetime.fromtimestamp(ts)
         if get_detail:
             accounts = self.populate_extended_account_detail(accounts)
         return accounts
