@@ -111,6 +111,8 @@ class Mint(requests.Session):
         if self.token is not None:
             return
 
+        self.cookies['ius_session'] = self.session_cookie
+
         # 1: Login.
         login_url = 'https://wwws.mint.com/login.event?task=L'
         try:
