@@ -52,10 +52,11 @@ class Mint(requests.Session):
     request_id = 42  # magic number? random number?
     token = None
 
-    def __init__(self, email=None, password=None):
+    def __init__(self, email=None, password=None, session_cookie=None):
         requests.Session.__init__(self)
         self.mount('https://', MintHTTPSAdapter())
         if email and password:
+            self.session_cookie = session_cookie
             self.login_and_get_token(email, password)
 
     @classmethod
@@ -111,6 +112,8 @@ class Mint(requests.Session):
         if self.token is not None:
             return
 
+        self.cookies['ius_session'] = self.session_cookie
+
         # 1: Login.
         login_url = 'https://wwws.mint.com/login.event?task=L'
         try:
@@ -121,6 +124,9 @@ class Mint(requests.Session):
         data = {'username': email}
         response = self.post('https://wwws.mint.com/getUserPod.xevent',
                              data=data, headers=self.json_headers).text
+
+        self.post('https://accounts.mint.com/access_client/sign_in',headers=self.json_headers,
+                  json={'username': email, 'password': password})
 
         data = {'username': email, 'password': password, 'task': 'L',
                 'browser': 'firefox', 'browserVersion': '27', 'os': 'linux'}
