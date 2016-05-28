@@ -557,7 +557,8 @@ class Mint(requests.Session):
         waited = 0
         while True:
             result = self.request_and_check(
-                'https://wwws.mint.com/userStatus.xevent?rnd='+str(random.randint(0, 10**14)),
+                'https://wwws.mint.com/userStatus.xevent?rnd=' +
+                str(random.randint(0, 10**14)),
                 headers=self.json_headers,
                 expected_content_type='application/json')
             data = json.loads(result.text)
@@ -568,6 +569,7 @@ class Mint(requests.Session):
             else:
                 waited += 1
                 time.sleep(refresh_every)
+
 
 def get_accounts(email, password, get_detail=False):
     mint = Mint.create(email, password)
@@ -630,17 +632,25 @@ def main():
                          'implies --accounts)')
     cmdline.add_argument('--transactions', '-t', action='store_true',
                          default=False, help='Retrieve transactions')
-    cmdline.add_argument('--extended-transactions',action='store_true',default=False,
-                         help='Retrieve transactions with extra information and arguments')
-    cmdline.add_argument('--start-date',nargs='?',default=None,
-                         help='Earliest date for transactions to be retrieved from. Used with --extended-transactions. Format: mm/dd/yy')
-    cmdline.add_argument('--include-investment',action='store_true',default=False,
+    cmdline.add_argument('--extended-transactions', action='store_true',
+                         default=False,
+                         help='Retrieve transactions with extra '
+                         'information and arguments')
+    cmdline.add_argument('--start-date', nargs='?', default=None,
+                         help='Earliest date for transactions to be '
+                         'retrieved from. Used with --extended-transactions. '
+                         'Format: mm/dd/yy')
+    cmdline.add_argument('--include-investment', action='store_true',
+                         default=False,
                          help='Used with --extended-transactions')
-    cmdline.add_argument('--skip-duplicates',action='store_true',default=False,
+    cmdline.add_argument('--skip-duplicates', action='store_true',
+                         default=False,
                          help='Used with --extended-transactions')
-# Displayed to the user as a postive switch, but processed back here as a negative
-    cmdline.add_argument('--show-pending',action='store_false',default=True,
-                         help='Exclude pending transactions from being retrieved. Used with --extended-transactions')
+# Displayed to the user as a postive switch,
+# but processed back here as a negative
+    cmdline.add_argument('--show-pending', action='store_false', default=True,
+                         help='Exclude pending transactions from being '
+                         'retrieved. Used with --extended-transactions')
     cmdline.add_argument('--filename', '-f', help='write results to file. can '
                          'be {csv,json} format. default is to write to '
                          'stdout.')
@@ -648,7 +658,9 @@ def main():
                          help='Use OS keyring for storing password '
                          'information')
     cmdline.add_argument('--wait-for-account-refresh', action='store_true',
-                         default=False, help='Initiate account refresh on Mint.com and wait for refresh to finish before executing other commands')
+                         default=False, help='Initiate account refresh on '
+                         'Mint.com and wait for refresh to finish before '
+                         'executing other commands')
 
     options = cmdline.parse_args()
 
@@ -689,7 +701,10 @@ def main():
     if options.accounts_ext:
         options.accounts = True
 
-    if not any([options.accounts, options.budgets, options.transactions, options.extended_transactions,
+    if not any([options.accounts,
+                options.budgets,
+                options.transactions,
+                options.extended_transactions,
                 options.net_worth]):
         options.accounts = True
 
@@ -728,10 +743,11 @@ def main():
     elif options.transactions:
         data = mint.get_transactions()
     elif options.extended_transactions:
-        data = mint.get_detailed_transactions(start_date=options.start_date,
-                                              include_investment=options.include_investment,
-                                              remove_pending=options.show_pending,
-                                              skip_duplicates=options.skip_duplicates
+        data = mint.get_detailed_transactions(
+                start_date=options.start_date,
+                include_investment=options.include_investment,
+                remove_pending=options.show_pending,
+                skip_duplicates=options.skip_duplicates
         )
     elif options.net_worth:
         data = mint.get_net_worth()
