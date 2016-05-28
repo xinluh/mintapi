@@ -236,22 +236,31 @@ class Mint(requests.Session):
         appropriate value.  This affects what is displayed in the web
         interface.  Note that the CSV transactions never exclude duplicates.
         """
-        # Converts the start date into datetime format - must be mm/dd/yy
-        try:
-            start_date = datetime.strptime(start_date, '%m/%d/%y')
-        except:
-            start_date = None
 
+        # Return everything if start_date is not specified
         if not start_date:
             return list(self.get_transactions_raw(
                             include_investment=include_investment,
                             skip_duplicates=skip_duplicates))
 
+        # Parse start_date if necessary
+        for formats in ['%m/%d/%y', '%m/%d/%Y', '%Y-%m-%d']:
+            if type(start_date) is datetime:
+                break
+            try:
+                start_date = datetime.strptime(start_date, formats)
+            except:
+                pass
+        if type(start_date) is not datetime:
+            raise Exception('start_date %s is not provided in a '
+                            'recognized format. Try e.g. 2016-01-01.'
+                            % start_date)
+
         txns = []
         for trans in self.get_transactions_raw(
                             include_investment=include_investment,
                             skip_duplicates=skip_duplicates):
-            if self._dateconvert(trans['odate']) < start_date:
+            if self._dateconvert(trans['date']) < start_date:
                 break
             txns.append(trans)
 
