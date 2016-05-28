@@ -236,18 +236,37 @@ class Mint(requests.Session):
         appropriate value.  This affects what is displayed in the web
         interface.  Note that the CSV transactions never exclude duplicates.
         """
-
-
-        # Warning: This is a global property for the user that we are changing.
-        self.set_user_property('hide_duplicates',
-                               'T' if skip_duplicates else 'F')
-
         # Converts the start date into datetime format - must be mm/dd/yy
         try:
             start_date = datetime.strptime(start_date, '%m/%d/%y')
         except:
             start_date = None
-        all_txns = []
+
+        if not start_date:
+            return list(self.get_transactions_raw(
+                            include_investment=include_investment,
+                            skip_duplicates=skip_duplicates))
+
+        txns = []
+        for trans in self.get_transactions_raw(
+                            include_investment=include_investment,
+                            skip_duplicates=skip_duplicates):
+            if self._dateconvert(trans['odate']) < start_date:
+                break
+            txns.append(trans)
+
+        return txns
+
+    def get_transactions_raw(self, include_investment=False,
+                             skip_duplicates=False):
+        """Returns the raw JSON transaction data as downloaded as generator.
+        See get_transactions_json.
+        """
+
+        # Warning: This is a global property for the user that we are changing.
+        self.set_user_property('hide_duplicates',
+                               'T' if skip_duplicates else 'F')
+
         offset = 0
         # Mint only returns some of the transactions at once.  To get all of
         # them, we have to keep asking for more until we reach the end.
@@ -269,22 +288,12 @@ class Mint(requests.Session):
                 expected_content_type='application/json')
             data = json.loads(result.text)
             txns = data['set'][0].get('data', [])
-            df = pd.DataFrame(txns)
-            if start_date:
-                dates = list(df['odate'])
-                last_dt = self._dateconvert(dates[-1])
-                if last_dt < start_date:
-                    keep_txns = []
-                    for item in txns:
-                        if self._dateconvert(item['odate']) >= start_date:
-                            keep_txns.append(item)
-                    all_txns.extend(keep_txns)
-                    break
             if not txns:
                 break
-            all_txns.extend(txns)
+
             offset += len(txns)
-        return all_txns
+            for txn in txns:
+                yield txn
 
     def get_detailed_transactions(self, include_investment=False,
                                   skip_duplicates=False,
