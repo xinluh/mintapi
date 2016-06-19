@@ -132,7 +132,10 @@ class Mint(requests.Session):
         self.post('https://wwws.mint.com/getUserPod.xevent',
                   data=data, headers=self.json_headers)
 
-        data = {'task': 'L',
+        self.post('https://accounts.mint.com/access_client/sign_in',headers=self.json_headers,
+                  json={'username': email, 'password': password})
+
+        data = {'username': email, 'password': password, 'task': 'L',
                 'browser': 'firefox', 'browserVersion': '27', 'os': 'linux'}
         response = self.post('https://wwws.mint.com/loginUserSubmit.xevent',
                              data=data, headers=self.json_headers).text
