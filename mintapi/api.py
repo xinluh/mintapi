@@ -114,7 +114,7 @@ class Mint(requests.Session):
         self.cookies['ius_session'] = self.session_cookie
 
         # 1: Login.
-        login_url = 'https://wwws.mint.com/login.event?task=L'
+        login_url = 'https://mint.intuit.com/login.event?task=L'
         try:
             self.request_and_check(login_url)
         except RuntimeError:
@@ -122,22 +122,22 @@ class Mint(requests.Session):
 
         self.cookies['ius_session'] = ius_session
         data = {'username': email, 'password': password}
-        response = self.post('https://accounts.mint.com/access_client/sign_in',
+        response = self.post('https://accounts.intuit.com/access_client/sign_in',
                              json=data, headers=self.json_headers).text
 
         json_response = json.loads(response)
         if json_response.get('action') == 'CHALLENGE':
             raise Exception('Challenge required, please log in to Mint.com manually and complete the captcha.')
         data = {'clientType': 'Mint', 'authid': json_response['iamTicket']['userId']}
-        self.post('https://wwws.mint.com/getUserPod.xevent',
+        self.post('https://mint.intuit.com/getUserPod.xevent',
                   data=data, headers=self.json_headers)
 
-        self.post('https://accounts.mint.com/access_client/sign_in',headers=self.json_headers,
+        self.post('https://accounts.intuit.com/access_client/sign_in',headers=self.json_headers,
                   json={'username': email, 'password': password})
 
         data = {'username': email, 'password': password, 'task': 'L',
                 'browser': 'firefox', 'browserVersion': '27', 'os': 'linux'}
-        response = self.post('https://wwws.mint.com/loginUserSubmit.xevent',
+        response = self.post('https://mint.intuit.com/loginUserSubmit.xevent',
                              data=data, headers=self.json_headers).text
 
         if 'token' not in response:
@@ -175,7 +175,7 @@ class Mint(requests.Session):
         }
 
         data = {'input': json.dumps([input])}
-        account_data_url = ('https://wwws.mint.com/bundledServiceController.'
+        account_data_url = ('https://mint.intuit.com/bundledServiceController.'
                             'xevent?legacy=false&token=' + self.token)
         response = self.post(account_data_url, data=data,
                              headers=self.json_headers).text
@@ -205,7 +205,7 @@ class Mint(requests.Session):
         return accounts
 
     def set_user_property(self, name, value):
-        url = ('https://wwws.mint.com/bundledServiceController.xevent?' +
+        url = ('https://mint.intuit.com/bundledServiceController.xevent?' +
                'legacy=false&token=' + self.token)
         req_id = str(self.request_id)
         self.request_id += 1
@@ -297,7 +297,7 @@ class Mint(requests.Session):
             # transactions as well.  Otherwise they are skipped by
             # default.
             url = (
-                'https://wwws.mint.com/getJsonData.xevent?' +
+                'https://mint.intuit.com/getJsonData.xevent?' +
                 'queryNew=&offset={offset}&comparableType=8&' +
                 'rnd={rnd}&{query_options}').format(
                     offset=offset,
@@ -363,7 +363,7 @@ class Mint(requests.Session):
         # transactions as well.  Otherwise they are skipped by
         # default.
         result = self.request_and_check(
-            'https://wwws.mint.com/transactionDownload.event' +
+            'https://mint.intuit.com/transactionDownload.event' +
             ('?accountId=0' if include_investment else ''),
             headers=self.headers,
             expected_content_type='text/csv'
@@ -408,10 +408,10 @@ class Mint(requests.Session):
         # and parsing the HTML snippet :(
         for account in accounts:
             headers = self.json_headers
-            headers['Referer'] = ('https://wwws.mint.com/transaction.event?'
+            headers['Referer'] = ('https://mint.intuit.com/transaction.event?'
                                   'accountId=' + str(account['id']))
 
-            list_txn_url = ('https://wwws.mint.com/listTransaction.xevent?'
+            list_txn_url = ('https://mint.intuit.com/listTransaction.xevent?'
                             'accountId=' + str(account['id']) + '&queryNew=&'
                             'offset=0&comparableType=8&acctChanged=T&rnd=' +
                             Mint.get_rnd())
@@ -475,7 +475,7 @@ class Mint(requests.Session):
             }])
         }
 
-        cat_url = ('https://wwws.mint.com/bundledServiceController.xevent'
+        cat_url = ('https://mint.intuit.com/bundledServiceController.xevent'
                    '?legacy=false&token=' + self.token)
         response = self.post(cat_url, data=data,
                              headers=self.json_headers).text
@@ -509,7 +509,7 @@ class Mint(requests.Session):
         last_year = (str(last_year.month).zfill(2) +
                      '/01/' + str(last_year.year))
         response = json.loads(self.get(
-            'https://wwws.mint.com/getBudget.xevent?startDate=' + last_year +
+            'https://mint.intuit.com/getBudget.xevent?startDate=' + last_year +
             '&endDate=' + this_month + '&rnd=' + Mint.get_rnd(),
             headers=self.json_headers
         ).text)
@@ -554,7 +554,7 @@ class Mint(requests.Session):
         data = {
             'token': self.token
         }
-        self.post('https://wwws.mint.com/refreshFILogins.xevent',
+        self.post('https://mint.intuit.com/refreshFILogins.xevent',
                   data=data, headers=self.json_headers)
 
     def refresh_accounts(self, max_wait_time=60, refresh_every=10):
@@ -564,7 +564,7 @@ class Mint(requests.Session):
         waited = 0
         while True:
             result = self.request_and_check(
-                'https://wwws.mint.com/userStatus.xevent?rnd=' +
+                'https://mint.intuit.com/userStatus.xevent?rnd=' +
                 str(random.randint(0, 10**14)),
                 headers=self.json_headers,
                 expected_content_type='application/json')
