@@ -111,7 +111,7 @@ class Mint(requests.Session):
         if self.token is not None:
             return
 
-        self.cookies['ius_session'] = self.session_cookie
+        self.cookies['ius_session'] = ius_session
 
         # 1: Login.
         login_url = 'https://mint.intuit.com/login.event?task=L'
