@@ -33,12 +33,16 @@ def assert_pd():
             'please pip install pandas'
         )
 
+
 DATE_FIELDS = [
     'addAccountDate',
     'closeDate',
     'fiLastUpdated',
     'lastUpdated',
 ]
+
+MINT_ROOT_URL = 'https://mint.intuit.com'
+MINT_ACCOUNTS_URL = 'https://accounts.intuit.com'
 
 
 class MintHTTPSAdapter(HTTPAdapter):
@@ -52,16 +56,17 @@ class Mint(requests.Session):
     request_id = 42  # magic number? random number?
     token = None
 
-    def __init__(self, email=None, password=None, ius_session=None):
+    def __init__(self, email=None, password=None, ius_session=None, thx_guid=None):
         requests.Session.__init__(self)
+        self.headers.update({'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9) AppleWebKit/537.71 (KHTML, like Gecko) Version/7.0 Safari/537.71'})
         self.mount('https://', MintHTTPSAdapter())
         if email and password:
-            self.login_and_get_token(email, password, ius_session)
+            self.login_and_get_token(email, password, ius_session, thx_guid)
 
     @classmethod
-    def create(cls, email, password):  # {{{
+    def create(cls, email, password, ius_session=None, thx_guid=None):  # {{{
         mint = Mint()
-        mint.login_and_get_token(email, password, None)
+        mint.login_and_get_token(email, password, ius_session, thx_guid)
         return mint
 
     @classmethod
@@ -106,7 +111,7 @@ class Mint(requests.Session):
                     (url, content_type, expected_content_type))
         return result
 
-    def login_and_get_token(self, email, password, ius_session):  # {{{
+    def login_and_get_token(self, email, password, ius_session, thx_guid):  # {{{
         # 0: Check to see if we're already logged in.
         if self.token is not None:
             return
@@ -114,22 +119,38 @@ class Mint(requests.Session):
         self.cookies['ius_session'] = ius_session
 
         # 1: Login.
-        login_url = 'https://mint.intuit.com/login.event?task=L'
+        login_url = '{}/login.event'.format(MINT_ROOT_URL)
         try:
             self.request_and_check(login_url)
         except RuntimeError:
             raise Exception('Failed to load Mint login page')
 
-        self.cookies['ius_session'] = ius_session
         data = {'username': email, 'password': password}
-        response = self.post('https://accounts.intuit.com/access_client/sign_in',
+
+        # Extract ius_token/thx_guid using browser if not provided manually
+        if not ius_session:
+            session_cookies = self.get_session_cookies(**data)
+        else:
+            session_cookies = {
+                'ius_session': ius_session,
+                'thx_guid': thx_guid
+            }
+        self.cookies.update(session_cookies)
+
+        self.get('https://pf.intuit.com/fp/tags?js=0&org_id=v60nf4oj&session_id=' + self.cookies['ius_session'])
+
+        response = self.post('{}/access_client/sign_in'.format(MINT_ACCOUNTS_URL),
                              json=data, headers=self.json_headers).text
 
         json_response = json.loads(response)
         if json_response.get('action') == 'CHALLENGE':
             raise Exception('Challenge required, please log in to Mint.com manually and complete the captcha.')
+
+        if json_response.get('responseCode') == 'INVALID_CREDENTIALS':
+            raise Exception('Username/Password is incorrect.  Please verify and try again.')
+
         data = {'clientType': 'Mint', 'authid': json_response['iamTicket']['userId']}
-        self.post('https://mint.intuit.com/getUserPod.xevent',
+        self.post('{}/getUserPod.xevent'.format(MINT_ROOT_URL),
                   data=data, headers=self.json_headers)
 
         self.post('https://accounts.intuit.com/access_client/sign_in',headers=self.json_headers,
@@ -137,7 +158,7 @@ class Mint(requests.Session):
 
         data = {'username': email, 'password': password, 'task': 'L',
                 'browser': 'firefox', 'browserVersion': '27', 'os': 'linux'}
-        response = self.post('https://mint.intuit.com/loginUserSubmit.xevent',
+        response = self.post('{}/loginUserSubmit.xevent'.format(MINT_ROOT_URL),
                              data=data, headers=self.json_headers).text
 
         if 'token' not in response:
@@ -150,7 +171,38 @@ class Mint(requests.Session):
         # 2: Grab token.
         self.token = response['sUser']['token']
 
-    def get_accounts(self, parse_date=True, get_detail=False):  # {{{
+    def get_session_cookies(self, username, password):
+        try:
+            from selenium import webdriver
+            driver = webdriver.Chrome()
+        except Exception as e:
+            raise RuntimeError("ius_session not specified, and was unable to load "
+                               "the chromedriver selenium plugin. Please ensure "
+                               "that the `selenium` and `chromedriver` packages "
+                               "are installed.\n\nThe original error message was: " +
+                               (e.args[0] if len(e.args) > 0 else 'No error message found.'))
+
+        driver.get("https://www.mint.com")
+        driver.implicitly_wait(20)  # seconds
+        driver.find_element_by_link_text("Log In").click()
+
+        driver.find_element_by_id("ius-userid").send_keys(username)
+        driver.find_element_by_id("ius-password").send_keys(password)
+        driver.find_element_by_id("ius-sign-in-submit-btn").submit()
+
+        # Wait until logged in, just in case we need to deal with MFA.
+        while not driver.current_url.startswith('https://mint.intuit.com/overview.event'):
+            time.sleep(1)
+
+        try:
+            return {
+                'ius_session': driver.get_cookie('ius_session')['value'],
+                'thx_guid': driver.get_cookie('thx_guid')['value']
+            }
+        finally:
+            driver.close()
+
+    def get_accounts(self, get_detail=False):  # {{{
         # Issue service request.
         req_id = str(self.request_id)
 
@@ -175,8 +227,7 @@ class Mint(requests.Session):
         }
 
         data = {'input': json.dumps([input])}
-        account_data_url = ('https://mint.intuit.com/bundledServiceController.'
-                            'xevent?legacy=false&token=' + self.token)
+        account_data_url = '{}/bundledServiceController.xevent?legacy=false&token={}'.format(MINT_ROOT_URL, self.token)
         response = self.post(account_data_url, data=data,
                              headers=self.json_headers).text
         self.request_id = self.request_id + 1
@@ -205,8 +256,7 @@ class Mint(requests.Session):
         return accounts
 
     def set_user_property(self, name, value):
-        url = ('https://mint.intuit.com/bundledServiceController.xevent?' +
-               'legacy=false&token=' + self.token)
+        url = '{}/bundledServiceController.xevent?legacy=false&token={}'.format(MINT_ROOT_URL, self.token)
         req_id = str(self.request_id)
         self.request_id += 1
         result = self.post(
@@ -286,8 +336,7 @@ class Mint(requests.Session):
         """
 
         # Warning: This is a global property for the user that we are changing.
-        self.set_user_property('hide_duplicates',
-                               'T' if skip_duplicates else 'F')
+        self.set_user_property('hide_duplicates', 'T' if skip_duplicates else 'F')
 
         offset = 0
         # Mint only returns some of the transactions at once.  To get all of
@@ -297,7 +346,8 @@ class Mint(requests.Session):
             # transactions as well.  Otherwise they are skipped by
             # default.
             url = (
-                'https://mint.intuit.com/getJsonData.xevent?' +
+                MINT_ROOT_URL +
+                '/getJsonData.xevent?' +
                 'queryNew=&offset={offset}&comparableType=8&' +
                 'rnd={rnd}&{query_options}').format(
                     offset=offset,
@@ -363,11 +413,10 @@ class Mint(requests.Session):
         # transactions as well.  Otherwise they are skipped by
         # default.
         result = self.request_and_check(
-            'https://mint.intuit.com/transactionDownload.event' +
+            '{}/transactionDownload.event'.format(MINT_ROOT_URL) +
             ('?accountId=0' if include_investment else ''),
             headers=self.headers,
-            expected_content_type='text/csv'
-            )
+            expected_content_type='text/csv')
         return result.content
 
     def get_net_worth(self, account_data=None):
@@ -390,11 +439,11 @@ class Mint(requests.Session):
                 net_worth += current_balance
         return net_worth
 
-    def get_transactions(self):
+    def get_transactions(self, include_investment=False):
         """Returns the transaction data as a Pandas DataFrame.
         """
         assert_pd()
-        s = StringIO(self.get_transactions_csv())
+        s = StringIO(self.get_transactions_csv(include_investment=include_investment))
         s.seek(0)
         df = pd.read_csv(s, parse_dates=['Date'])
         df.columns = [c.lower().replace(' ', '_') for c in df.columns]
@@ -408,11 +457,11 @@ class Mint(requests.Session):
         # and parsing the HTML snippet :(
         for account in accounts:
             headers = self.json_headers
-            headers['Referer'] = ('https://mint.intuit.com/transaction.event?'
+            headers['Referer'] = ('{}/transaction.event?'.format(MINT_ROOT_URL) +
                                   'accountId=' + str(account['id']))
 
-            list_txn_url = ('https://mint.intuit.com/listTransaction.xevent?'
-                            'accountId=' + str(account['id']) + '&queryNew=&'
+            list_txn_url = ('{}/listTransaction.xevent?'.format(MINT_ROOT_URL) +
+                            'accountId=' + str(account['id']) + '&queryNew=&' +
                             'offset=0&comparableType=8&acctChanged=T&rnd=' +
                             Mint.get_rnd())
 
@@ -475,8 +524,7 @@ class Mint(requests.Session):
             }])
         }
 
-        cat_url = ('https://mint.intuit.com/bundledServiceController.xevent'
-                   '?legacy=false&token=' + self.token)
+        cat_url = '{}/bundledServiceController.xevent?legacy=false&token={}'.format(MINT_ROOT_URL, self.token)
         response = self.post(cat_url, data=data,
                              headers=self.json_headers).text
         self.request_id = self.request_id + 1
@@ -509,7 +557,7 @@ class Mint(requests.Session):
         last_year = (str(last_year.month).zfill(2) +
                      '/01/' + str(last_year.year))
         response = json.loads(self.get(
-            'https://mint.intuit.com/getBudget.xevent?startDate=' + last_year +
+            MINT_ROOT_URL + '/getBudget.xevent?startDate=' + last_year +
             '&endDate=' + this_month + '&rnd=' + Mint.get_rnd(),
             headers=self.json_headers
         ).text)
@@ -551,11 +599,8 @@ class Mint(requests.Session):
 
     def initiate_account_refresh(self):
         # Submit refresh request.
-        data = {
-            'token': self.token
-        }
-        self.post('https://mint.intuit.com/refreshFILogins.xevent',
-                  data=data, headers=self.json_headers)
+        data = {'token': self.token}
+        self.post('{}/refreshFILogins.xevent'.format(MINT_ROOT_URL), data=data, headers=self.json_headers)
 
     def refresh_accounts(self, max_wait_time=60, refresh_every=10):
         """Initiate an account refresh and wait for the refresh to finish.
@@ -578,8 +623,8 @@ class Mint(requests.Session):
                 time.sleep(refresh_every)
 
 
-def get_accounts(email, password, get_detail=False):
-    mint = Mint.create(email, password)
+def get_accounts(email, password, get_detail=False, ius_session=None):
+    mint = Mint.create(email, password, ius_session=ius_session)
     return mint.get_accounts(get_detail=get_detail)
 
 
@@ -675,8 +720,10 @@ def main():
         cmdline.error('--keyring can only be used if the `keyring` '
                       'library is installed.')
 
-    try:
+    try: # python 2.x
         from __builtin__ import raw_input as input
+    except ImportError: # python 3
+        from builtins import input
     except NameError:
         pass
 
@@ -715,7 +762,7 @@ def main():
                 options.net_worth]):
         options.accounts = True
 
-    mint = Mint.create(email, password)
+    mint = Mint.create(email, password, ius_session=options.session, thx_guid=options.thx_guid)
 
     if options.wait_for_account_refresh:
         mint.refresh_accounts()
@@ -748,7 +795,7 @@ def main():
         except:
             data = None
     elif options.transactions:
-        data = mint.get_transactions()
+        data = mint.get_transactions(include_investment=options.include_investment)
     elif options.extended_transactions:
         data = mint.get_detailed_transactions(
                 start_date=options.start_date,
@@ -777,6 +824,7 @@ def main():
                 json.dump(data, f, indent=2)
         else:
             raise ValueError('file type must be json for non-transaction data')
+
 
 if __name__ == '__main__':
     main()
