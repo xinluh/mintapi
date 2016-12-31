@@ -202,7 +202,7 @@ class Mint(requests.Session):
         finally:
             driver.close()
 
-    def get_accounts(self, get_detail=False):  # {{{
+    def get_accounts(self, get_detail=False, parse_date=False):  # {{{
         # Issue service request.
         req_id = str(self.request_id)
 
