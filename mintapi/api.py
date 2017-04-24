@@ -1,6 +1,7 @@
 import json
 import random
 import time
+import re
 
 try:
     from StringIO import StringIO  # Python 2
@@ -43,6 +44,10 @@ DATE_FIELDS = [
 
 MINT_ROOT_URL = 'https://mint.intuit.com'
 MINT_ACCOUNTS_URL = 'https://accounts.intuit.com'
+
+
+class MintException(Exception):
+    pass
 
 
 class MintHTTPSAdapter(HTTPAdapter):
@@ -105,7 +110,7 @@ class Mint(requests.Session):
                                (url, result.status_code))
         if expected_content_type is not None:
             content_type = result.headers.get('content-type', '')
-            if not content_type.startswith(expected_content_type):
+            if not re.match(expected_content_type, content_type):
                 raise RuntimeError(
                     'Error requesting %r, content type %r does not match %r' %
                     (url, content_type, expected_content_type))
@@ -123,7 +128,7 @@ class Mint(requests.Session):
         try:
             self.request_and_check(login_url)
         except RuntimeError:
-            raise Exception('Failed to load Mint login page')
+            raise MintException('Failed to load Mint login page')
 
         data = {'username': email, 'password': password}
 
@@ -144,10 +149,10 @@ class Mint(requests.Session):
 
         json_response = json.loads(response)
         if json_response.get('action') == 'CHALLENGE':
-            raise Exception('Challenge required, please log in to Mint.com manually and complete the captcha.')
+            raise MintException('Challenge required, please log in to Mint.com manually and complete the captcha.')
 
         if json_response.get('responseCode') == 'INVALID_CREDENTIALS':
-            raise Exception('Username/Password is incorrect.  Please verify and try again.')
+            raise MintException('Username/Password is incorrect.  Please verify and try again.')
 
         data = {'clientType': 'Mint', 'authid': json_response['iamTicket']['userId']}
         self.post('{}/getUserPod.xevent'.format(MINT_ROOT_URL),
@@ -162,11 +167,11 @@ class Mint(requests.Session):
                              data=data, headers=self.json_headers).text
 
         if 'token' not in response:
-            raise Exception('Mint.com login failed[1]')
+            raise MintException('Mint.com login failed[1]')
 
         response = json.loads(response)
         if not response['sUser']['token']:
-            raise Exception('Mint.com login failed[2]')
+            raise MintException('Mint.com login failed[2]')
 
         # 2: Grab token.
         self.token = response['sUser']['token']
@@ -232,7 +237,7 @@ class Mint(requests.Session):
                              headers=self.json_headers).text
         self.request_id = self.request_id + 1
         if req_id not in response:
-            raise Exception('Could not parse account data: ' + response)
+            raise MintException('Could not parse account data: ' + response)
 
         # Parse the request
         response = json.loads(response)
@@ -268,10 +273,10 @@ class Mint(requests.Session):
                                         'id': req_id}])},
             headers=self.json_headers)
         if result.status_code != 200:
-            raise Exception('Received HTTP error %d' % result.status_code)
+            raise MintException('Received HTTP error %d' % result.status_code)
         response = result.text
         if req_id not in response:
-            raise Exception("Could not parse response to set_user_property")
+            raise MintException("Could not parse response to set_user_property")
 
     def _dateconvert(self, dateraw):
         # Converts dates from json data
@@ -357,9 +362,15 @@ class Mint(requests.Session):
                         else 'task=transactions,txnfilters&filterType=cash'))
             result = self.request_and_check(
                 url, headers=self.json_headers,
-                expected_content_type='application/json')
+                expected_content_type='text/json|application/json')
             data = json.loads(result.text)
             txns = data['set'][0].get('data', [])
+            if start_date:
+                last_dt = self._dateconvert(txns[-1]['odate'])
+                if last_dt < start_date:
+                    keep_txns = [t for t in txns if self._dateconvert(t['odate']) >= start_date]
+                    all_txns.extend(keep_txns)
+                    break
             if not txns:
                 break
 
@@ -529,16 +540,14 @@ class Mint(requests.Session):
                              headers=self.json_headers).text
         self.request_id = self.request_id + 1
         if req_id not in response:
-            raise Exception('Could not parse category data: "' +
-                            response + '"')
+            raise MintException('Could not parse category data: "' +
+                                response + '"')
         response = json.loads(response)
         response = response['response'][req_id]['response']
 
         # Build category list
         categories = {}
         for category in response['allCategories']:
-            if category['parentId'] == 0:
-                continue
             categories[category['id']] = category
 
         return categories
@@ -720,9 +729,9 @@ def main():
         cmdline.error('--keyring can only be used if the `keyring` '
                       'library is installed.')
 
-    try: # python 2.x
+    try:  # python 2.x
         from __builtin__ import raw_input as input
-    except ImportError: # python 3
+    except ImportError:  # python 3
         from builtins import input
     except NameError:
         pass
